@@ -1,0 +1,244 @@
+/*
+ * Copyright (c) 2026 by Naohide Sano, All rights reserved.
+ *
+ * Programmed by Naohide Sano
+ */
+
+package vavi.sound.wind;
+
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import javax.sound.midi.MetaMessage;
+import javax.sound.midi.MidiChannel;
+import javax.sound.midi.MidiDevice;
+import javax.sound.midi.MidiDevice.Info;
+import javax.sound.midi.MidiMessage;
+import javax.sound.midi.MidiSystem;
+import javax.sound.midi.Receiver;
+import javax.sound.midi.Sequencer;
+import javax.sound.midi.ShortMessage;
+import javax.sound.midi.Synthesizer;
+import javax.sound.midi.SysexMessage;
+import javax.sound.midi.Transmitter;
+
+import vavi.sound.midi.MidiUtil.MidiMatcher;
+import vavi.util.Debug;
+import vavi.util.StringUtil;
+import vavi.util.properties.annotation.Property;
+import vavi.util.properties.annotation.PropsEntity;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIf;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+
+import static vavi.sound.midi.MidiUtil.getMidiDevice;
+
+
+/**
+ * TestCase.
+ *
+ * @author <a href="mailto:umjammer@gmail.com">Naohide Sano</a> (nsano)
+ * @version 0.00 2026-09-04 nsano initial version <br>
+ */
+@EnabledIf("localPropertiesExists")
+@PropsEntity(url = "file:local.properties")
+class TestCase {
+
+    static boolean localPropertiesExists() {
+        return Files.exists(Paths.get("local.properties"));
+    }
+
+    @Property(name = "in.name")
+    String inName;
+
+    @Property(name = "in.vendor")
+    String inVendor;
+
+    @Property(name = "in.description")
+    String inDescription;
+
+    @Property(name = "out.name")
+    String outName;
+
+    @Property(name = "out.vendor")
+    String outVendor;
+
+    @Property(name = "out.description")
+    String outDescription;
+
+    @Property(name = "vavi.test.volume.midi")
+    float midiVolume = 0.2f;
+
+    @BeforeEach
+    void setup() throws Exception {
+        if (localPropertiesExists()) {
+            PropsEntity.Util.bind(this);
+        }
+
+        outName = outName != null ? (outName.isEmpty() ? null : outName) : null;
+        outVendor = outVendor != null ? (outVendor.isEmpty() ? null : outVendor) : null;
+        outDescription = outDescription != null ? (outDescription.isEmpty() ? null : outDescription) : null;
+
+        Debug.println("volume: " + midiVolume);
+    }
+
+    /** opens the midi keyboard which is specified by local.properties */
+    MidiDevice openInputDevice() throws Exception {
+        Info info = getMidiDevice(new MidiMatcher(inName, inVendor, inDescription, null), true);
+        MidiDevice device = MidiSystem.getMidiDevice(info);
+Debug.println("---- " + info + " (" + device.getClass().getName() + ")" + " ----");
+Debug.println("name      : " + info.getName());
+Debug.println("vendor    : " + info.getVendor());
+Debug.println("descriptor: " + info.getDescription());
+Debug.println("version   : " + info.getVersion());
+        device.open();
+        return device;
+    }
+
+    @Test
+    @DisplayName("specified in to specified out")
+    @EnabledIfSystemProperty(named = "vavi.test", matches = "ide")
+    void test2() throws Exception {
+
+        MidiDevice device = openInputDevice();
+
+        Info outInfo = getMidiDevice(new MidiMatcher(outName, outVendor, outDescription, null), false);
+        MidiDevice outDevice =  MidiSystem.getMidiDevice(outInfo);
+Debug.println("---- " + outInfo +" (" + outDevice.getClass().getName() + ")" + " ----");
+Debug.println("name      : " + outInfo.getName());
+Debug.println("vendor    : " + outInfo.getVendor());
+Debug.println("descriptor: " + outInfo.getDescription());
+Debug.println("version   : " + outInfo.getVersion());
+        outDevice.open();
+
+        // Now, display strings from synthInfos list in GUI.
+
+        Transmitter transmitter = device.getTransmitter();
+//        transmitter.setReceiver(new SimpleReceiver(outDevice.getReceiver()));
+        transmitter.setReceiver(outDevice.getReceiver());
+
+        CountDownLatch cdl = new CountDownLatch(1);
+Debug.println("waiting...");
+        cdl.await();
+Debug.println("done");
+
+        device.close();
+    }
+
+    /** print received message */
+    static class SimpleReceiver implements Receiver {
+        Receiver receiver;
+        SimpleReceiver(Receiver receiver) {
+            this.receiver = receiver;
+        }
+        @Override
+        public void send(MidiMessage message, long timeStamp) {
+            if (message instanceof ShortMessage shortMessage) {
+                int channel = shortMessage.getChannel();
+                int command = shortMessage.getCommand();
+                int data1 = shortMessage.getData1();
+                int data2 = shortMessage.getData2();
+Debug.printf("short: command: %02x, channel: %d, data1: %d, data2: %d", command, channel, data1, data2);
+                switch (command) {
+                    case ShortMessage.NOTE_OFF:
+                        break;
+                    case ShortMessage.NOTE_ON:
+                        break;
+                    case ShortMessage.POLY_PRESSURE:
+                        break;
+                    case ShortMessage.CONTROL_CHANGE:
+                        break;
+                    case ShortMessage.PROGRAM_CHANGE:
+                        break;
+                    case ShortMessage.CHANNEL_PRESSURE:
+                        break;
+                    case ShortMessage.PITCH_BEND:
+                        break;
+                }
+            } else if (message instanceof SysexMessage sysexMessage) {
+                byte[] data = sysexMessage.getData();
+Debug.println("sysex: %02X\n%s".formatted(sysexMessage.getStatus(), StringUtil.getDump(data, 32)));
+            } else if (message instanceof MetaMessage metaMessage) {
+Debug.println("meta: %02x".formatted(metaMessage.getType()));
+            } else {
+                assert false;
+            }
+
+            receiver.send(message, timeStamp);
+        }
+
+        @Override
+        public void close() {
+        }
+    }
+
+    /** */
+    static String getInOut(MidiDevice device) {
+        if (device.getMaxTransmitters() == 0 && device.getMaxReceivers() == 0)
+            return "UNKNOWN(t:" + device.getMaxTransmitters() + ", r:" + device.getMaxReceivers() + ")";
+        else if (device.getMaxTransmitters() == 0)
+            return "INPUT";
+        else if (device.getMaxReceivers() == 0)
+            return "OUTPUT";
+        else
+            return "INOUT(t:" + device.getMaxTransmitters() + ", r:" + device.getMaxReceivers() + ")";
+    }
+
+    /**
+     * @see "https://bonar.hatenablog.com/entry/20090322/1237711377"
+     */
+    @Test
+    @DisplayName("show info")
+    @EnabledIfSystemProperty(named = "vavi.test", matches = "ide")
+    void test0() throws Exception {
+        // MIDI
+        Synthesizer synthesizer;
+        Sequencer sequencer;
+        MidiChannel[] channels;
+
+        // Obtain information about all the installed synthesizers.
+        List<Info> synthInfos = new ArrayList<>();
+        MidiDevice device = null;
+        MidiDevice.Info[] infos = MidiSystem.getMidiDeviceInfo();
+
+        for (int i = 0; i < infos.length; i++) {
+            device = MidiSystem.getMidiDevice(infos[i]);
+System.err.println("---- [" + i + "] " + infos[i] +" (" + device.getClass().getName() + ")" + " " + getInOut(device) + " ----");
+System.err.println("name      : " + infos[i].getName());
+System.err.println("vendor    : " + infos[i].getVendor());
+System.err.println("descriptor: " + infos[i].getDescription());
+System.err.println("version   : " + infos[i].getVersion());
+            synthInfos.add(infos[i]);
+        }
+
+        // Now, display strings from synthInfos list in GUI.
+
+System.err.println("----");
+        sequencer = MidiSystem.getSequencer();
+System.err.println("default sequencer: " + sequencer.getDeviceInfo());
+System.err.println("default sequencer: " + sequencer);
+        sequencer.open();
+
+System.err.println("---- t0");
+        synthesizer = MidiSystem.getSynthesizer();
+System.err.println("default synthesizer: " + synthesizer.getDeviceInfo());
+System.err.println("default synthesizer: " + synthesizer);
+        channels = synthesizer.getChannels();
+System.err.println("channels: " + channels.length);
+System.err.println("sound bank: " + synthesizer.getDefaultSoundbank());
+System.err.println("instruments: "+ synthesizer.getLoadedInstruments().length);
+
+        Receiver receiver = MidiSystem.getReceiver();
+System.err.println("default receiver: " + receiver);
+
+        Transmitter transmitter = MidiSystem.getTransmitter();
+System.err.println("default transmitter: " + transmitter);
+
+        sequencer.close();
+    }
+}
