@@ -5,6 +5,8 @@
 
 # vavi-sound-wind
 
+<img alt="midi logo" src="src/test/resources/duke_ewi.png" width="160" />
+
 a wind controller synthesizer, as a java midi spi
 
 A clone of **IFW - Instrument for Wind Controllers**, the audio unit that plays from a
@@ -110,3 +112,7 @@ from older versions that stop partway through the 200 slot table.
  * ~~the midi spi~~
  * the original single cycle instrument waves, rather than harmonic approximations
  * a GUI for the panel
+
+---
+
+<sub>image designed by @umjammer, drawn by nano banana</sub>
