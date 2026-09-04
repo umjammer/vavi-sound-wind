@@ -5,7 +5,7 @@
 
 # vavi-sound-wind
 
-<img alt="midi logo" src="src/test/resources/duke_ewi.png" width="160" />
+<img alt="logo" src="src/test/resources/duke_ewi.png" width="160" />
 
 a wind controller synthesizer, as a java midi spi
 
@@ -156,6 +156,11 @@ from older versions that stop partway through the 200 slot table.
 ## References
 
  * IFW - Instrument for Wind Controllers, version 1.0.39
+
+### Lesson
+
+ - when idea uses graalvm, junit test runner becomes different from when openjdk.
+   so volume mixer controller like `BackGroundMusic.app` setting for `JUnitStarter` doesn't work. 
 
 ## TODO
 
