@@ -37,6 +37,7 @@ import javax.sound.sampled.DataLine;
 import javax.sound.sampled.LineUnavailableException;
 import javax.sound.sampled.SourceDataLine;
 
+import vavi.sound.wind.BreathResponse;
 import vavi.sound.wind.IfwEngine;
 import vavi.sound.wind.IfwProgram;
 import vavi.sound.wind.IfwSoundbank;
@@ -93,7 +94,32 @@ public class WindSynthesizer implements Synthesizer {
     private static final float SAMPLE_RATE = 44100;
 
     /** samples per rendering cycle */
-    private static final int BLOCK_SIZE = 512;
+    private static final int BLOCK_SIZE = Integer.getInteger("vavi.sound.wind.block", 256);
+
+    /**
+     * how many blocks the audio device is allowed to sit on, which is the latency.
+     * <p>
+     * a wind controller is played against the sound, so this has to stay small: left to
+     * itself the mixer hands out half a second, and half a second of breath arriving late
+     * is the difference between an instrument and a tape recorder. four blocks is 23 ms
+     * at the default block size, against the 1.4 ms it costs to fill one with all sixteen
+     * parts sounding. raise it if the machine cannot keep up and the sound breaks up.
+     */
+    private static final int BLOCKS_BUFFERED = Integer.getInteger("vavi.sound.wind.buffer", 4);
+
+    /** the player's end of the breath controller, {@code low,high,depth} */
+    private static final BreathResponse BREATH_RESPONSE = breathResponse();
+
+    /** */
+    private static BreathResponse breathResponse() {
+        String property = System.getProperty("vavi.sound.wind.breath");
+        try {
+            return property == null ? BreathResponse.DEFAULT : BreathResponse.valueOf(property);
+        } catch (IllegalArgumentException e) {
+logger.log(Level.WARNING, "vavi.sound.wind.breath: " + e.getMessage());
+            return BreathResponse.DEFAULT;
+        }
+    }
 
     /** 16 bit, stereo, signed, little endian */
     private final AudioFormat audioFormat = new AudioFormat(SAMPLE_RATE, 16, 2, true, false);
@@ -130,8 +156,34 @@ public class WindSynthesizer implements Synthesizer {
         for (int i = 0; i < channels.length; i++) {
             channels[i] = new WindMidiChannel(i);
         }
+        breathResponse(BREATH_RESPONSE);
         this.soundbank = defaultSoundbank();
         Collections.addAll(loaded, soundbank.getInstruments());
+    }
+
+    /**
+     * How the travel of the breath controller becomes loudness, on every channel.
+     * <p>
+     * this is the player's setting rather than the tone's, so it is set here and not in
+     * the soundbank. it starts at {@link BreathResponse#DEFAULT}, or at whatever
+     * {@code -Dvavi.sound.wind.breath=low,high,depth} asks for.
+     *
+     * @see BreathResponse
+     */
+    public void setBreathResponse(BreathResponse breathResponse) {
+        breathResponse(breathResponse);
+    }
+
+    /** */
+    private void breathResponse(BreathResponse breathResponse) {
+        for (WindMidiChannel channel : channels) {
+            channel.engine.setBreathResponse(breathResponse);
+        }
+    }
+
+    /** what {@link #setBreathResponse(BreathResponse)} last set */
+    public BreathResponse getBreathResponse() {
+        return channels[0].engine.getBreathResponse();
     }
 
     /** the tones IFW has installed, or the initial program alone */
@@ -163,8 +215,9 @@ logger.log(Level.WARNING, "already open: " + hashCode());
             DataLine.Info lineInfo = new DataLine.Info(SourceDataLine.class, audioFormat, AudioSystem.NOT_SPECIFIED);
             line = (SourceDataLine) AudioSystem.getLine(lineInfo);
             line.addLineListener(event -> logger.log(Level.DEBUG, "Line: " + event.getType()));
-            line.open(audioFormat);
+            line.open(audioFormat, BLOCK_SIZE * BLOCKS_BUFFERED * audioFormat.getFrameSize());
             line.start();
+logger.log(Level.DEBUG, "latency: " + line.getBufferSize() / audioFormat.getFrameSize() * 1000 / SAMPLE_RATE + " ms");
         } catch (LineUnavailableException e) {
             throw (MidiUnavailableException) new MidiUnavailableException().initCause(e);
         }

@@ -239,6 +239,48 @@ class IfwEngineTest {
         assertTrue(rms(11025, 11025) > .01f, "the instrument wave should be audible");
     }
 
+    @Test
+    void theBreathResponseSpreadsTheLoudnessOverTheTravel() {
+        IfwProgram program = sine();  // its filter is wide open, so this is the amp alone
+        assertEquals(BreathResponse.DEFAULT, engine().getBreathResponse());
+
+        float straight = dB(program, BreathResponse.LINEAR, .5f);
+        float shaped = dB(program, BreathResponse.DEFAULT, .5f);
+        // straight through, half breath is the 6 dB that makes the top of the sensor dull
+        assertEquals(-6.02f, straight, .3f);
+        assertEquals(-11.6f, shaped, .5f);
+    }
+
+    @Test
+    void theBreathResponseLeavesTheTonesOwnFiltersAlone() {
+        // the amp is taken out of it, so what is left answers breath only through filter 1
+        IfwProgram program = sine();
+        program.set(IfwParameter.Amp1Breath, 0);
+        program.set(IfwParameter.Amp2Breath, 0);
+        program.set(IfwParameter.Filter1Frequency, 0);
+        program.set(IfwParameter.Filter1Breath, 7);
+
+        assertEquals(dB(program, BreathResponse.LINEAR, .5f), dB(program, BreathResponse.DEFAULT, .5f), 1e-3f);
+        assertEquals(dB(program, BreathResponse.LINEAR, .2f), dB(program, BreathResponse.DEFAULT, .2f), 1e-3f);
+    }
+
+    /** the steady level at one breath position, in dB under the same tone at full breath */
+    private float dB(IfwProgram program, BreathResponse response, float breath) {
+        return 20 * (float) Math.log10(level(program, response, breath) / level(program, response, 1));
+    }
+
+    /** */
+    private float level(IfwProgram program, BreathResponse response, float breath) {
+        IfwEngine engine = engine();
+        engine.setProgram(program);
+        engine.setBreathResponse(response);
+        engine.setBreath(breath);
+        engine.noteOn(69, 100);
+        Arrays.fill(left, 0);
+        render(engine, 0, 22050);
+        return rms(11025, 11025);
+    }
+
     @ParameterizedTest
     @MethodSource("tones")
     @EnabledIf("soundsExist")

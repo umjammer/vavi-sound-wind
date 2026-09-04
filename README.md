@@ -79,6 +79,40 @@ engine.render(left, right, 0, 1024);
 A keyboard that sends none of that still sounds: until the first breath message arrives,
 note velocity stands in for it.
 
+### Playing feel
+
+An IFW tone file holds no breath curve. A tone shapes breath only with its `BREATH` knobs,
+its breath sub mod and the modulation matrix, so the curve is the tone designer's business,
+and the fifty tones IFW installs answer the controller very differently. What is missing is
+the player's own end of it, the part a wind controller keeps in its setup rather than in the
+patch, so it lives outside the tone here:
+
+```java
+synthesizer.setBreathResponse(new BreathResponse(0, 1, 18)); // low, high, depth in dB
+```
+
+`low` and `high` say where the sensor really rests and really tops out, so that the whole of
+the travel is used. `depth` says how many decibels that travel is spread over. It matters
+because a level that follows breath straight, which is what IFW does, has all of its decibels
+crammed into the bottom: half breath is 6 dB down and the top half of the sensor does almost
+nothing, which is what makes a wind synthesizer feel like a switch. Spending them evenly is
+the rule a mixing desk fader and MIDI volume already follow, and the one the ear reads as
+even, since loudness goes with the logarithm of the level.
+
+The default is 18 dB, which over the installed tones moves the middle one from answering half
+breath 10 dB under its loudest to answering it 16 dB under, and its whole travel from 32 dB
+to 41 dB, about what an acoustic wind instrument gives from its softest note to its loudest.
+`BreathResponse.LINEAR`, or `-Dvavi.sound.wind.breath=0,1,0`, puts back exactly what IFW does.
+
+The curve reaches the amps only, so the tone's own filters keep answering the controller
+itself and stay bright across the whole of the travel.
+
+The other half of the feel is latency, which is why the synthesizer asks the audio device for
+a small buffer rather than taking the half second it offers: four blocks of 256 frames, 23 ms.
+`-Dvavi.sound.wind.block` and `-Dvavi.sound.wind.buffer` move it, up if the machine cannot
+keep up and the sound breaks up, though one block costs 1.4 ms to fill with all sixteen parts
+sounding.
+
 ## Notes
 
 IFW ships no specification, so the parameter table, the value ranges and the choice
@@ -110,6 +144,7 @@ from older versions that stop partway through the 200 slot table.
  * ~~read the tone files IFW writes~~
  * ~~the synthesis engine~~
  * ~~the midi spi~~
+ * ~~the breath curve and the latency, so that it plays like an instrument~~
  * the original single cycle instrument waves, rather than harmonic approximations
  * a GUI for the panel
 

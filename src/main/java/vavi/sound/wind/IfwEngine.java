@@ -9,6 +9,7 @@ package vavi.sound.wind;
 import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.Deque;
+import java.util.Objects;
 
 import static vavi.sound.wind.IfwParameter.Amp1Breath;
 import static vavi.sound.wind.IfwParameter.Amp1BreathSubMod;
@@ -206,6 +207,9 @@ public class IfwEngine {
 
     /** whether a breath controller has ever been heard on this engine */
     private boolean breathReceived;
+
+    /** the player's end of the breath controller, outside the tone */
+    private BreathResponse breathResponse = BreathResponse.DEFAULT;
 
     /** -1 .. 1 */
     private float bendTarget;
@@ -441,6 +445,22 @@ public class IfwEngine {
         return breathTarget;
     }
 
+    /**
+     * How the travel of the breath controller becomes loudness, which is the player's
+     * setting rather than the tone's. it reaches the amplifiers only, so that the tone
+     * keeps its own filters answering breath over the whole of the travel.
+     *
+     * @see BreathResponse
+     */
+    public void setBreathResponse(BreathResponse breathResponse) {
+        this.breathResponse = Objects.requireNonNull(breathResponse);
+    }
+
+    /** */
+    public BreathResponse getBreathResponse() {
+        return breathResponse;
+    }
+
     /** the pitch bend wheel, -1 .. 1 */
     public void setPitchBend(float bend) {
         this.bendTarget = Math.max(-1, Math.min(1, bend));
@@ -585,9 +605,11 @@ public class IfwEngine {
             }
         }
 
+        // the amplifiers hear the player's curve, the filters and the matrix the controller itself
+        float loudness = breathResponse.apply(breath);
         float master = mod[ModDestination.AmpMasterLevel.ordinal()];
-        float amp1 = amp(Amp1Level, Amp1Breath, amp1SubMod, ModDestination.Amp1Level, master, breath);
-        float amp2 = amp(Amp2Level, Amp2Breath, amp2SubMod, ModDestination.Amp2Level, master, breath);
+        float amp1 = amp(Amp1Level, Amp1Breath, amp1SubMod, ModDestination.Amp1Level, master, loudness);
+        float amp2 = amp(Amp2Level, Amp2Breath, amp2SubMod, ModDestination.Amp2Level, master, loudness);
 
         float out = (amp1In * amp1 + amp2In * amp2) * gate;
         out = exciter.process(toneControl.process(out));
