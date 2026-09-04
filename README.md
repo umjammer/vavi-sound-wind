@@ -113,6 +113,22 @@ a small buffer rather than taking the half second it offers: four blocks of 256 
 keep up and the sound breaks up, though one block costs 1.4 ms to fill with all sixteen parts
 sounding.
 
+The master volume is the universal realtime device control the MIDI specification already
+carries, `F0 7F <device> 04 01 <lsb> <msb> F7`, and there is no method beside it:
+
+```java
+MidiUtil.volume(synthesizer.getReceiver(), .5f); // 14 bits over silence .. unity
+```
+
+The mix of sixteen parts under it runs into the same soft knee the tones do, at -1.4 dBFS,
+rather than squaring off. `-Dvavi.sound.wind.volume` says where it stands before the first
+sysex arrives, since a sequencer will usually never send one.
+
+Spreading breath out deliberately leaves everything under full breath quieter than IFW has
+it, and a player who never reaches the top of the sensor loses that much again. Calibrating
+`high` to where the sensor really tops out is what gets that back, and a smaller `depth`
+trades some of the feel for the rest of it.
+
 ## Notes
 
 IFW ships no specification, so the parameter table, the value ranges and the choice
@@ -128,8 +144,10 @@ did, it was made to do the musical thing:
   plug-in binary and are not distributable, so each is rebuilt from the harmonic
   amplitudes of the instrument it is named after
 * a program is free to run four oscillators into both busses and both amps, which is
-  what the CLIP lamp on the IFW panel is for; here everything under -3 dBFS passes
-  untouched and the rest bends into a knee that never quite reaches full scale
+  what the CLIP lamp on the IFW panel is for, so each bus is scaled by the slots the
+  program actually turned up rather than by that worst case, which is what keeps a plain
+  tone at the level the rest of the world puts it at; past -1.4 dBFS the output bends
+  into a knee that approaches full scale without passing it
 
 The tone reader copes with what IFW actually writes: a trailing NUL after the root
 element, an unescaped `&` in a tone name, a missing `CurrentProgram` wrapper, and files

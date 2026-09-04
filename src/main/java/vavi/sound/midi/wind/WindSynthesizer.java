@@ -41,6 +41,7 @@ import vavi.sound.wind.BreathResponse;
 import vavi.sound.wind.IfwEngine;
 import vavi.sound.wind.IfwProgram;
 import vavi.sound.wind.IfwSoundbank;
+import vavi.sound.wind.Limiter;
 
 import static java.lang.System.getLogger;
 import static vavi.sound.midi.wind.WindMidiDeviceProvider.version;
@@ -145,8 +146,19 @@ logger.log(Level.WARNING, "vavi.sound.wind.breath: " + e.getMessage());
     /** */
     private SourceDataLine line;
 
-    /** master gain by sysex master volume */
-    private volatile float masterGain = 1;
+    /** the universal realtime master volume, 0 .. 1 */
+    private volatile float masterGain = volume();
+
+    /** where the master volume stands before any sysex has arrived */
+    private static float volume() {
+        String property = System.getProperty("vavi.sound.wind.volume");
+        try {
+            return property == null ? 1 : Math.clamp(Float.parseFloat(property), 0, 1);
+        } catch (NumberFormatException e) {
+logger.log(Level.WARNING, "vavi.sound.wind.volume: " + property);
+            return 1;
+        }
+    }
 
     /** the rendering thread */
     private ExecutorService executor;
@@ -184,6 +196,22 @@ logger.log(Level.WARNING, "vavi.sound.wind.breath: " + e.getMessage());
     /** what {@link #setBreathResponse(BreathResponse)} last set */
     public BreathResponse getBreathResponse() {
         return channels[0].engine.getBreathResponse();
+    }
+
+    /**
+     * The volume of the whole mix, 1 being the tones as they come.
+     * <p>
+     * there is no setter to go with this. the master volume is the universal realtime
+     * device control the MIDI specification already carries, so it is set by sending that
+     * sysex to {@link #getReceiver()} and by nothing else. the mix of sixteen parts under
+     * it runs into a soft knee at -1.4 dBFS rather than squaring off.
+     * <p>
+     * {@code -Dvavi.sound.wind.volume} says where it stands before the first one arrives,
+     * since an SPI synthesizer is usually opened and played by a sequencer that will never
+     * send one.
+     */
+    public float getMasterVolume() {
+        return masterGain;
     }
 
     /** the tones IFW has installed, or the initial program alone */
@@ -247,9 +275,11 @@ logger.log(Level.DEBUG, "latency: " + line.getBufferSize() / audioFormat.getFram
                 for (WindMidiChannel channel : channels) {
                     channel.render(left, right);
                 }
+                float gain = masterGain;
                 for (int i = 0; i < BLOCK_SIZE; i++) {
-                    write(buffer, i * 4, left[i] * masterGain);
-                    write(buffer, i * 4 + 2, right[i] * masterGain);
+                    // sixteen parts and the master volume on top, so the mix needs a knee too
+                    write(buffer, i * 4, Limiter.process(left[i] * gain));
+                    write(buffer, i * 4 + 2, Limiter.process(right[i] * gain));
                 }
                 line.write(buffer, 0, buffer.length);
             } catch (Exception e) {
@@ -749,6 +779,7 @@ logger.log(Level.DEBUG, "unhandled short: %02X".formatted(shortMessage.getComman
                     byte[] data = sysexMessage.getData();
                     // universal realtime, device control, master volume
                     if (data.length >= 6 && data[0] == 0x7f && data[2] == 0x04 && data[3] == 0x01) {
+                        // F0 7F <device> 04 01 <lsb> <msb> F7, 14 bits over silence .. unity
                         masterGain = ((data[4] & 0x7f) | (data[5] & 0x7f) << 7) / 16383f;
 logger.log(Level.DEBUG, "sysex volume: gain: %4.2f".formatted(masterGain));
                     } else {

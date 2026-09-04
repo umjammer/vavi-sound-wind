@@ -115,6 +115,10 @@ Debug.println("vendor    : " + outInfo.getVendor());
 Debug.println("descriptor: " + outInfo.getDescription());
 Debug.println("version   : " + outInfo.getVersion());
         outDevice.open();
+        Receiver receiver = outDevice.getReceiver();
+        // the master volume sysex is 14 bits over silence .. unity, and MidiUtil does not
+        // clamp, so anything over 1 wraps round and comes out quieter than 1 would
+            volume(receiver, Math.min(1, midiVolume));
 
         // Now, display strings from synthInfos list in GUI.
 

@@ -19,6 +19,7 @@ import javax.sound.midi.Receiver;
 import javax.sound.midi.ShortMessage;
 import javax.sound.midi.Soundbank;
 import javax.sound.midi.Synthesizer;
+import javax.sound.midi.SysexMessage;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -128,6 +129,51 @@ class WindSynthesizerTest {
         try (OutputStream out = Files.newOutputStream(file)) {
             program.write(out);
         }
+    }
+
+    /** the universal realtime device control, {@code F0 7F <device> 04 01 <lsb> <msb> F7} */
+    static SysexMessage masterVolume(float volume) throws Exception {
+        int value = Math.round(16383 * volume);
+        byte[] message = {(byte) 0xf0, 0x7f, 0x7f, 0x04, 0x01,
+                (byte) (value & 0x7f), (byte) (value >> 7 & 0x7f), (byte) 0xf7};
+        return new SysexMessage(message, message.length);
+    }
+
+    @Test
+    void theMasterVolumeIsSetByTheUniversalRealtimeSysex() throws Exception {
+        WindSynthesizer synthesizer = new WindSynthesizer();
+        Receiver receiver = synthesizer.getReceiver();
+        assertEquals(1, synthesizer.getMasterVolume(), "it should start wide open");
+
+        for (float volume : new float[] {.5f, 0, .25f, 1}) {
+            receiver.send(masterVolume(volume), -1);
+            assertEquals(volume, synthesizer.getMasterVolume(), 1e-3f);
+        }
+    }
+
+    @Test
+    void aSequencerShapeOfTheSameSysexAlsoWorks() throws Exception {
+        // what a standard MIDI file hands over: the body alone, no F0 and no F7
+        WindSynthesizer synthesizer = new WindSynthesizer();
+        int value = 16383 / 4;
+        byte[] body = {0x7f, 0x7f, 0x04, 0x01, (byte) (value & 0x7f), (byte) (value >> 7 & 0x7f)};
+        SysexMessage message = new SysexMessage();
+        message.setMessage(0xf0, body, body.length);
+
+        synthesizer.getReceiver().send(message, -1);
+        assertEquals(.25f, synthesizer.getMasterVolume(), 1e-3f);
+    }
+
+    @Test
+    void somethingThatIsNotAMasterVolumeLeavesItAlone() throws Exception {
+        WindSynthesizer synthesizer = new WindSynthesizer();
+        Receiver receiver = synthesizer.getReceiver();
+        receiver.send(masterVolume(.5f), -1);
+
+        // GM system on, which shares the universal non realtime shape but is not this
+        byte[] other = {(byte) 0xf0, 0x7e, 0x7f, 0x09, 0x01, (byte) 0xf7};
+        receiver.send(new SysexMessage(other, other.length), -1);
+        assertEquals(.5f, synthesizer.getMasterVolume(), 1e-3f);
     }
 
     /**

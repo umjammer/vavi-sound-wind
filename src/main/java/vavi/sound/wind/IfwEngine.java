@@ -82,8 +82,8 @@ public class IfwEngine {
     /** MIDI CC 2, what a wind controller blows into */
     public static final int BREATH_CONTROLLER = 2;
 
-    /** where the master limiter stops being transparent, about -3 dBFS */
-    private static final float KNEE = .7f;
+    /** where a bus is aimed, a little under full scale so that the limiter stays out of it */
+    private static final float HEADROOM = .8f;
 
     /** how often the filters and the effects follow the knobs, in samples */
     private static final int CONTROL_INTERVAL = 8;
@@ -130,6 +130,29 @@ public class IfwEngine {
         }
     }
 
+    /**
+     * What a bus has to be scaled by for the slots actually feeding it to fit.
+     * <p>
+     * a program may run four oscillators of three slots each into one bus, and dividing by
+     * that worst case would throw away 12 dB on the ordinary tone that runs one oscillator
+     * into it. so this counts what the program really turned up, which keeps the level of a
+     * plain tone where the rest of the world puts it and leaves the oscillators in the mix
+     * the program asked for, since scaling the bus does not touch what is inside it.
+     * <p>
+     * it aims a little under full scale rather than at it, so that an ordinary tone passes
+     * the master limiter without ever touching its knee, and it never goes over unity, so a
+     * tone that is quiet because it was dialled quiet stays that way.
+     */
+    private float busScale(boolean[] routed) {
+        float sum = 0;
+        for (int i = 0; i < 4; i++) {
+            if (routed[i]) {
+                sum += (knob(OSC[i][SAW]) + knob(OSC[i][TRI]) + knob(OSC[i][THIRD])) / 10;
+            }
+        }
+        return HEADROOM / Math.max(1, sum);
+    }
+
     /** the parameters named {@code formats} for slot 1 .. n */
     private static IfwParameter[][] table(int n, String... formats) {
         IfwParameter[][] result = new IfwParameter[n][formats.length];
@@ -157,6 +180,8 @@ public class IfwEngine {
     private final PcmWaveform[] oscPcm = new PcmWaveform[4];
     /** the semi and tune knobs as a frequency factor */
     private final float[] oscDetune = new float[4];
+    /** what each bus has to be scaled by for the slots actually feeding it to fit */
+    private float busScale1 = 1, busScale2 = 1;
     private final boolean[] egRetrigger = new boolean[4];
     private FilterType filter1Type = FilterType.LPF12, filter2Type = FilterType.LPF12;
     private FilterConnection connection = FilterConnection.Serial;
@@ -287,6 +312,8 @@ public class IfwEngine {
             egRetrigger[i] = program.is(IfwParameter.valueOf("Eg" + n + "Retrigger"));
             envelopes[i].set(knob(EG[i][ATTACK]), knob(EG[i][DECAY]), knob(EG[i][SUSTAIN]), knob(EG[i][RELEASE]));
         }
+        busScale1 = busScale(oscOut1);
+        busScale2 = busScale(oscOut2);
         for (int i = 0; i < 2; i++) {
             String n = String.valueOf(i + 1);
             LfoWaveform waveform = program.choice(IfwParameter.valueOf("Lfo" + n + "Waveform"), LfoWaveform.class);
@@ -503,26 +530,9 @@ public class IfwEngine {
     public void render(float[] left, float[] right, int offset, int length) {
         for (int i = 0; i < length; i++) {
             enhancer.process(renderMono(), stereo);
-            left[offset + i] += limit(stereo[0]);
-            right[offset + i] += limit(stereo[1]);
+            left[offset + i] += Limiter.process(stereo[0]);
+            right[offset + i] += Limiter.process(stereo[1]);
         }
-    }
-
-    /**
-     * Holds the output inside full scale.
-     * <p>
-     * a program is free to run four oscillators of three slots each into both busses and
-     * then into both amps, which is what the CLIP lamp on the IFW panel is for. rather
-     * than let that square off, everything below -3 dBFS passes untouched and the rest
-     * bends into a knee that never quite reaches one.
-     */
-    private static float limit(float value) {
-        float magnitude = Math.abs(value);
-        if (magnitude <= KNEE) {
-            return value;
-        }
-        float over = (magnitude - KNEE) / (1 - KNEE);
-        return Math.signum(value) * (KNEE + (1 - KNEE) * over / (float) Math.sqrt(1 + over * over));
     }
 
     /** Renders one sample of the whole instrument, before the enhancer makes it stereo. */
@@ -577,9 +587,8 @@ public class IfwEngine {
             }
         }
 
-        // four oscillators of three slots each, keep the busses in a sane place
-        out1 *= .25f;
-        out2 *= .25f;
+        out1 *= busScale1;
+        out2 *= busScale2;
 
         if (--controlCountdown <= 0) {
             controlCountdown = CONTROL_INTERVAL;

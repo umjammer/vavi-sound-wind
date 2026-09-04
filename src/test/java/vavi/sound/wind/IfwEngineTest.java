@@ -239,6 +239,63 @@ class IfwEngineTest {
         assertTrue(rms(11025, 11025) > .01f, "the instrument wave should be audible");
     }
 
+    /** the loudest sample of the left channel over a stretch of the buffer */
+    float peak(int offset, int length) {
+        float peak = 0;
+        for (int i = 0; i < length; i++) {
+            peak = Math.max(peak, Math.abs(left[offset + i]));
+        }
+        return peak;
+    }
+
+    @Test
+    void aPlainToneArrivesLoudEnoughToSitInAMix() {
+        IfwEngine engine = engine();
+        engine.setProgram(sine());
+        engine.setBreath(1);
+        engine.noteOn(69, 100);
+        render(engine, 0, 22050);
+
+        // one oscillator into one bus, so the bus is scaled for one oscillator and no more
+        float peak = peak(11025, 11025);
+        assertTrue(peak > .7f, "a plain tone should not be buried, but peaks at " + peak);
+        assertTrue(peak <= 1, "and it should still fit, but peaks at " + peak);
+    }
+
+    @Test
+    void aPlainToneNeverTouchesTheLimiter() {
+        IfwEngine engine = engine();
+        engine.setProgram(sine());
+        engine.setBreath(1);
+        engine.noteOn(69, 100);
+        render(engine, 0, 22050);
+
+        // a sine at full breath is not what a limiter is for
+        for (int i = 11025; i < 22050; i++) {
+            assertTrue(Math.abs(left[i]) < .85f, "in the knee at sample " + i + ", " + left[i]);
+        }
+    }
+
+    @Test
+    void stackingOscillatorsThickensAToneRatherThanShoutingIt() {
+        IfwProgram program = sine();
+        for (int i = 2; i <= 4; i++) {
+            program.set(IfwParameter.valueOf("Osc" + i + "TriLevel"), 10);
+            program.set(IfwParameter.valueOf("Osc" + i + "Waveform2"), Waveform.SIN);
+            program.set(IfwParameter.valueOf("Osc" + i + "Output1"), Bool.On);
+        }
+        IfwEngine engine = engine();
+        engine.setProgram(program);
+        engine.setBreath(1);
+        engine.noteOn(69, 100);
+        render(engine, 0, 22050);
+
+        // four of them into one bus should land where one of them does, not four times over
+        float peak = peak(11025, 11025);
+        assertTrue(peak > .5f, "four oscillators should still be heard, but peak " + peak);
+        assertTrue(peak <= 1, "four oscillators should not run away, but peak " + peak);
+    }
+
     @Test
     void theBreathResponseSpreadsTheLoudnessOverTheTravel() {
         IfwProgram program = sine();  // its filter is wide open, so this is the amp alone
