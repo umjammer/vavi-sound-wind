@@ -37,6 +37,7 @@ import org.junit.jupiter.api.condition.EnabledIf;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
 import static vavi.sound.midi.MidiUtil.getMidiDevice;
+import static vavi.sound.midi.MidiUtil.volume;
 
 
 /**
@@ -84,7 +85,7 @@ class TestCase {
         outVendor = outVendor != null ? (outVendor.isEmpty() ? null : outVendor) : null;
         outDescription = outDescription != null ? (outDescription.isEmpty() ? null : outDescription) : null;
 
-        Debug.println("volume: " + midiVolume);
+Debug.println("volume: " + midiVolume);
     }
 
     /** opens the midi keyboard which is specified by local.properties */
@@ -118,13 +119,13 @@ Debug.println("version   : " + outInfo.getVersion());
         Receiver receiver = outDevice.getReceiver();
         // the master volume sysex is 14 bits over silence .. unity, and MidiUtil does not
         // clamp, so anything over 1 wraps round and comes out quieter than 1 would
-            volume(receiver, Math.min(1, midiVolume));
+        volume(receiver, Math.min(1, midiVolume));
 
         // Now, display strings from synthInfos list in GUI.
 
         Transmitter transmitter = device.getTransmitter();
-//        transmitter.setReceiver(new SimpleReceiver(outDevice.getReceiver()));
-        transmitter.setReceiver(outDevice.getReceiver());
+//        transmitter.setReceiver(new SimpleReceiver(receiver));
+        transmitter.setReceiver(receiver);
 
         CountDownLatch cdl = new CountDownLatch(1);
 Debug.println("waiting...");
@@ -206,18 +207,15 @@ Debug.println("meta: %02x".formatted(metaMessage.getType()));
         MidiChannel[] channels;
 
         // Obtain information about all the installed synthesizers.
-        List<Info> synthInfos = new ArrayList<>();
-        MidiDevice device = null;
         MidiDevice.Info[] infos = MidiSystem.getMidiDeviceInfo();
 
         for (int i = 0; i < infos.length; i++) {
-            device = MidiSystem.getMidiDevice(infos[i]);
+            MidiDevice device = MidiSystem.getMidiDevice(infos[i]);
 System.err.println("---- [" + i + "] " + infos[i] +" (" + device.getClass().getName() + ")" + " " + getInOut(device) + " ----");
 System.err.println("name      : " + infos[i].getName());
 System.err.println("vendor    : " + infos[i].getVendor());
 System.err.println("descriptor: " + infos[i].getDescription());
 System.err.println("version   : " + infos[i].getVersion());
-            synthInfos.add(infos[i]);
         }
 
         // Now, display strings from synthInfos list in GUI.
