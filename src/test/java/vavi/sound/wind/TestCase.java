@@ -102,11 +102,11 @@ Debug.println("volume: " + midiVolume);
     MidiDevice openInputDevice() throws Exception {
         Info info = getMidiDevice(new MidiMatcher(inName, inVendor, inDescription, null), true);
         MidiDevice device = MidiSystem.getMidiDevice(info);
-Debug.println("---- " + info + " (" + device.getClass().getName() + ")" + " ----");
-Debug.println("name      : " + info.getName());
-Debug.println("vendor    : " + info.getVendor());
-Debug.println("descriptor: " + info.getDescription());
-Debug.println("version   : " + info.getVersion());
+System.err.println("---- IN: " + info + " (" + device.getClass().getName() + ")" + " ----");
+System.err.println("name      : " + info.getName());
+System.err.println("vendor    : " + info.getVendor());
+System.err.println("descriptor: " + info.getDescription());
+System.err.println("version   : " + info.getVersion());
         device.open();
         return device;
     }
@@ -121,11 +121,11 @@ Debug.println("version   : " + info.getVersion());
         Info outInfo = getMidiDevice(new MidiMatcher(outName, outVendor, outDescription, null), false);
         MidiDevice outDevice =  MidiSystem.getMidiDevice(outInfo);
         assertInstanceOf(WindSynthesizer.class, outDevice);
-Debug.println("---- " + outInfo +" (" + outDevice.getClass().getName() + ")" + " ----");
-Debug.println("name      : " + outInfo.getName());
-Debug.println("vendor    : " + outInfo.getVendor());
-Debug.println("descriptor: " + outInfo.getDescription());
-Debug.println("version   : " + outInfo.getVersion());
+System.err.println("---- OUT: " + outInfo +" (" + outDevice.getClass().getName() + ")" + " ----");
+System.err.println("name      : " + outInfo.getName());
+System.err.println("vendor    : " + outInfo.getVendor());
+System.err.println("descriptor: " + outInfo.getDescription());
+System.err.println("version   : " + outInfo.getVersion());
         outDevice.open();
         Receiver receiver = outDevice.getReceiver();
         // the master volume sysex is 14 bits over silence .. unity, and MidiUtil does not

@@ -148,6 +148,7 @@ logger.log(Level.INFO, "the numbering is full, the rest is dropped: " + folder);
                 return;
             }
             try (InputStream in = new BufferedInputStream(Files.newInputStream(file))) {
+if (logger.isLoggable(Level.TRACE)) { System.out.printf("patch[%d.%d]: %s%n", patch(instruments.size()).getBank(), patch(instruments.size()).getProgram(), file); }
                 // the count so far is the number, so a file that turns out not to be a tone takes none
                 instruments.add(new IfwInstrument(this, patch(instruments.size()), IfwProgram.read(in)));
             } catch (IOException e) {
