@@ -7,9 +7,8 @@
 package vavi.sound.wind;
 
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import javax.sound.midi.MetaMessage;
 import javax.sound.midi.MidiChannel;
@@ -20,11 +19,14 @@ import javax.sound.midi.MidiSystem;
 import javax.sound.midi.Receiver;
 import javax.sound.midi.Sequencer;
 import javax.sound.midi.ShortMessage;
+import javax.sound.midi.Soundbank;
 import javax.sound.midi.Synthesizer;
 import javax.sound.midi.SysexMessage;
 import javax.sound.midi.Transmitter;
 
 import vavi.sound.midi.MidiUtil.MidiMatcher;
+import vavi.sound.midi.wind.WindSoundbankReader;
+import vavi.sound.midi.wind.WindSynthesizer;
 import vavi.util.Debug;
 import vavi.util.StringUtil;
 import vavi.util.properties.annotation.Property;
@@ -36,6 +38,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIf;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static vavi.sound.midi.MidiUtil.getMidiDevice;
 import static vavi.sound.midi.MidiUtil.volume;
 
@@ -72,6 +76,12 @@ class TestCase {
     @Property(name = "out.description")
     String outDescription;
 
+    @Property
+    int program;
+
+    @Property
+    String tone;
+
     @Property(name = "vavi.test.volume.midi")
     float midiVolume = 0.2f;
 
@@ -92,11 +102,11 @@ Debug.println("volume: " + midiVolume);
     MidiDevice openInputDevice() throws Exception {
         Info info = getMidiDevice(new MidiMatcher(inName, inVendor, inDescription, null), true);
         MidiDevice device = MidiSystem.getMidiDevice(info);
-Debug.println("---- " + info + " (" + device.getClass().getName() + ")" + " ----");
-Debug.println("name      : " + info.getName());
-Debug.println("vendor    : " + info.getVendor());
-Debug.println("descriptor: " + info.getDescription());
-Debug.println("version   : " + info.getVersion());
+System.err.println("---- IN: " + info + " (" + device.getClass().getName() + ")" + " ----");
+System.err.println("name      : " + info.getName());
+System.err.println("vendor    : " + info.getVendor());
+System.err.println("descriptor: " + info.getDescription());
+System.err.println("version   : " + info.getVersion());
         device.open();
         return device;
     }
@@ -110,16 +120,30 @@ Debug.println("version   : " + info.getVersion());
 
         Info outInfo = getMidiDevice(new MidiMatcher(outName, outVendor, outDescription, null), false);
         MidiDevice outDevice =  MidiSystem.getMidiDevice(outInfo);
-Debug.println("---- " + outInfo +" (" + outDevice.getClass().getName() + ")" + " ----");
-Debug.println("name      : " + outInfo.getName());
-Debug.println("vendor    : " + outInfo.getVendor());
-Debug.println("descriptor: " + outInfo.getDescription());
-Debug.println("version   : " + outInfo.getVersion());
+        assertInstanceOf(WindSynthesizer.class, outDevice);
+System.err.println("---- OUT: " + outInfo +" (" + outDevice.getClass().getName() + ")" + " ----");
+System.err.println("name      : " + outInfo.getName());
+System.err.println("vendor    : " + outInfo.getVendor());
+System.err.println("descriptor: " + outInfo.getDescription());
+System.err.println("version   : " + outInfo.getVersion());
         outDevice.open();
         Receiver receiver = outDevice.getReceiver();
         // the master volume sysex is 14 bits over silence .. unity, and MidiUtil does not
         // clamp, so anything over 1 wraps round and comes out quieter than 1 would
         volume(receiver, Math.min(1, midiVolume));
+
+        Synthesizer synthesizer = (Synthesizer) outDevice;
+        if (tone != null) {
+            // a tone, or a folder of them, in place of everything IFW has installed
+Debug.println("tone: " + tone);
+            Soundbank soundbank = new WindSoundbankReader().getSoundbank(Path.of(tone).toFile());
+            assertNotNull(soundbank, "not an IFW tone: " + tone);
+            synthesizer.loadAllInstruments(soundbank);
+        }
+        // the channel is on the first tone of the bank already, this is to pick another
+Debug.println("program: " + program);
+        MidiChannel channel = synthesizer.getChannels()[0];
+        channel.programChange(program);
 
         // Now, display strings from synthInfos list in GUI.
 

@@ -105,7 +105,7 @@ class BreathResponseTest {
         BreathResponse response = new BreathResponse(.1f, .9f, 24);
         assertEquals(response, BreathResponse.valueOf(response.toString()));
         assertEquals(response.hashCode(), BreathResponse.valueOf(response.toString()).hashCode());
-        assertNotEquals(response, BreathResponse.LINEAR);
+        assertNotEquals(BreathResponse.LINEAR, response);
         // a depth on its own, the rest left as it comes
         assertEquals(new BreathResponse(0, 1, 12), BreathResponse.valueOf(",,12"));
     }

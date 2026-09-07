@@ -15,8 +15,9 @@ the tones route breath into their filters and their amps, and without it they st
 silent, exactly as an EWI player expects.
 
 * one monophonic instrument per MIDI channel, sixteen parts in all
-* four oscillators, three filters, four envelopes, two LFOs, an eight slot modulation
-  matrix, EQ, an exciter and a stereo enhancer
+* four wavetable oscillators, a saturating transistor ladder, a 24 stage phaser, four
+  envelopes, two LFOs, an eight slot modulation matrix, EQ, an exciter and a stereo
+  enhancer, all of it run at four times the sample rate
 * reads the tone files IFW itself writes, `~/Documents/IFW/Sounds/**/*.xml`, as a
   `javax.sound.midi.Soundbank`
 
@@ -42,17 +43,27 @@ channel.noteOn(60, 100);
 channel.controlChange(2, 127); // breath, this is what makes it sound
 ```
 
-Load a folder of tones as a soundbank. A folder becomes a bank and the tones in it
-become its programs, both sorted by name; the tones loose in the top folder are bank 0.
+Load a tone, or a folder of them, as a soundbank. Every tone under the folder is numbered
+as one running count, in the order a player reads them: a folder's own tones first, sorted
+by name, then the folders in it, sorted by name, each read the same way. The count starts
+at bank 0 program 0 and runs on into the bank above every 128 tones, so a program change
+on its own walks the tones and no bank select is needed below 128. Loading a soundbank
+puts every channel on the tone at its own bank and program, so it sounds straight away.
 
 ```java
-Soundbank soundbank = MidiSystem.getSoundbank(new File(System.getProperty("user.home") + "/Documents/IFW/Sounds"));
+Soundbank soundbank = MidiSystem.getSoundbank(new File("Pan Flute.xml"));
 synthesizer.loadAllInstruments(soundbank);
 ```
 
-Without a soundbank the synthesizer looks for the tones IFW has installed, under
-`~/Documents/IFW/Sounds`. Point `-Dvavi.sound.wind.sounds=...` somewhere else, or get
-the IFW initial program alone when there is nothing there.
+Left alone the synthesizer already holds every tone IFW has installed, the whole of
+`~/Documents/IFW/Sounds` read by `WindSoundbankReader.getDefaultSoundbank()`, and every
+channel starts on the first of them. A program change is all it takes to walk them.
+Point `-Dvavi.sound.wind.sounds=...` somewhere else, or get the IFW initial program alone
+when there is nothing there.
+
+```java
+Soundbank installed = WindSoundbankReader.getDefaultSoundbank();
+```
 
 Render into your own buffers instead, one voice, no audio device:
 
@@ -120,9 +131,11 @@ carries, `F0 7F <device> 04 01 <lsb> <msb> F7`, and there is no method beside it
 MidiUtil.volume(synthesizer.getReceiver(), .5f); // 14 bits over silence .. unity
 ```
 
-The mix of sixteen parts under it runs into the same soft knee the tones do, at -1.4 dBFS,
-rather than squaring off. `-Dvavi.sound.wind.volume` says where it stands before the first
-sysex arrives, since a sequencer will usually never send one.
+The mix of sixteen parts runs into a soft knee at -1.4 dBFS rather than squaring off, and
+the knee belongs to the mix rather than to a tone: a tone arrives at exactly the level IFW
+gives it, which for one oscillator is a quarter of full scale.
+`-Dvavi.sound.wind.volume` says where the master stands before the first sysex arrives,
+since a sequencer will usually never send one.
 
 Spreading breath out deliberately leaves everything under full breath quieter than IFW has
 it, and a player who never reaches the top of the sensor loses that much again. Calibrating
@@ -131,23 +144,51 @@ trades some of the feel for the rest of it.
 
 ## Notes
 
-IFW ships no specification, so the parameter table, the value ranges and the choice
-lists were read back out of the plug-in binary and its tone files, and the sound is
-built to match the panel rather than sample-for-sample. Where nothing said what a knob
-did, it was made to do the musical thing:
+IFW ships no specification, so the algorithm was read back out of the plug-in binary
+itself: the parameter table, the choice lists, the modulation scales and the DSP are the
+ones the 1.0.39 build runs, not a reconstruction from the panel.
 
-* a modulation slot multiplies its two sources, scales the product by its depth, and adds
-  the result to its destination in the units of that destination's own knob, so a depth
-  of 10 sweeps a knob across its whole range
-* filter 3 is a stack of 2 to 24 all pass sections with feedback, not a cutoff filter
-* the instrument waves of `Waveform 3` (`ASax`, `Clarinet`, `Oboe` ...) live in the
-  plug-in binary and are not distributable, so each is rebuilt from the harmonic
-  amplitudes of the instrument it is named after
-* a program is free to run four oscillators into both busses and both amps, which is
-  what the CLIP lamp on the IFW panel is for, so each bus is scaled by the slots the
-  program actually turned up rather than by that worst case, which is what keeps a plain
-  tone at the level the rest of the world puts it at; past -1.4 dBFS the output bends
-  into a knee that approaches full scale without passing it
+* **the oscillators are wavetables, not generators.** every slot reads one cycle of 8192
+  samples, and a table is built per note holding only the harmonics that fit under
+  22050 Hz, `22050 / 440 * 2^((69 - note) / 12)` of them. notes that come out at the same
+  count share a table, which leaves 104 of them rather than 192. that is what the thirty
+  megabyte `wavecache.dat` in `~/Library/Application Support/IFW` holds, and where IFW is
+  installed it is read straight off it, so the waves are the ones the plug-in plays.
+  `-Dvavi.sound.wind.wavecache` points that elsewhere, and without it the sawtooth, the
+  triangle and the sine are rebuilt exactly and the seven instruments approximately
+* the `SAW` slot is that sawtooth, the `PWM` slot is the same sawtooth less a copy of
+  itself shifted by the `WIDTH` knob, and the `TRI` slot is whatever `Waveform 2` names.
+  **`Waveform 2` has twelve choices**, not five: the three `Ext.In` inputs, `TRI`, `SIN`
+  and then `ASax`, `Clarinet`, `D50Saw`, `Harmonica`, `Oboe`, `Tb` and `Tp`.
+  `Waveform 3` is read, clamped to a switch, and then never used at all
+* **filters 1 and 2 are one transistor ladder** of four one pole sections, each saturating
+  what it passes on, with the last fed back to the first. the four modes are taps off it
+  rather than separate filters, and only the 24 dB one gets the whole ladder's resonance
+  and drive. a cutoff counts in semitones over a table that starts at 2.04 Hz, which is
+  how the knob, the key tracking, the breath and the matrix are added before any of it is
+  worked out in hertz
+* **everything down to the amplifiers runs at four times the sample rate** and comes back
+  down through a 20 kHz section of its own, which is what lets the ladder saturate without
+  folding. `-Dvavi.sound.wind.oversample` takes that to 2 or 1 on a machine that cannot
+  keep up; one voice costs 0.31 ms per 256 frames at the full rate
+* an envelope segment counts a phase from one down to zero at the rate its knob asks for,
+  so a knob is a duration: an attack runs from under three milliseconds to nine seconds, a
+  decay or a release from nine milliseconds to seven. the attack is a straight line and
+  everything under it is bent three quarters of the way towards a fourth power
+* a modulation slot multiplies its two sources, scales the product by its depth and adds
+  the result to its destination, a depth of 10 being a whole knob, 24 semitones of pitch,
+  150 semitones of cutoff or a twentieth of an enhancer delay
+* filter 3 is a stack of 24 all pass sections with feedback and the `STAGE` knob choosing
+  where the output is taken from, crossfaded against the dry signal rather than added
+* an amplifier is `breath x its BREATH knob x its LEVEL knob`, held inside unity, so a
+  `BREATH` of 0 is silent rather than wide open. `BREATH` itself means the note gate, and
+  `BRxEGn` an envelope
+* **each oscillator is worth a quarter of a bus**, whether or not the other three are
+  used, so a plain one oscillator tone peaks a quarter of the way up and four in step fill
+  the bus exactly. a tone that runs all four into both busses and both amplifiers goes
+  past full scale, which is what the CLIP lamp on the IFW panel is for; there is no
+  limiter inside a tone, and the one at -1.4 dBFS belongs to the synthesizer that mixes
+  the sixteen parts
 
 The tone reader copes with what IFW actually writes: a trailing NUL after the root
 element, an unescaped `&` in a tone name, a missing `CurrentProgram` wrapper, and files
@@ -168,7 +209,10 @@ from older versions that stop partway through the 200 slot table.
  * ~~the synthesis engine~~
  * ~~the midi spi~~
  * ~~the breath curve and the latency, so that it plays like an instrument~~
- * the original single cycle instrument waves, rather than harmonic approximations
+ * ~~the true algorithm, read back out of the plug-in binary~~
+ * ~~the original single cycle instrument waves, where IFW itself is installed~~
+ * the seven instrument waves on a machine that has no IFW on it, rather than
+   approximations of them
  * a GUI for the panel
 
 ---

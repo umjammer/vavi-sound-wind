@@ -30,11 +30,13 @@ import static java.lang.System.getLogger;
 /**
  * IfwSoundbank. a folder of IFW tones as a {@link Soundbank}.
  * <p>
- * IFW has no bank file of its own: a tone is one {@code .xml} under
- * {@code ~/Documents/IFW/Sounds} and the folders below it are how a player keeps their
- * tones apart. so a folder becomes a bank, sorted by name, and the tones in it become
- * the programs of that bank, also sorted by name. the tones sitting loose in the top
- * folder are bank 0, which is what a program change with no bank select reaches.
+ * IFW has no bank file of its own, and no numbering either: a tone is one {@code .xml}
+ * under {@code ~/Documents/IFW/Sounds} and the folders below it are how a player keeps
+ * their tones apart. so the numbering is one running count over the lot, in the order a
+ * player reads them: the tones sitting loose in a folder first, sorted by name, then the
+ * folders in it, sorted by name, each one read the same way. the count is program 0 of
+ * bank 0 upwards, running on into the bank above every {@value #BANK_SIZE} tones, so a
+ * program change with no bank select reaches the first {@value #BANK_SIZE} of them.
  *
  * @author <a href="mailto:umjammer@gmail.com">Naohide Sano</a> (nsano)
  * @version 0.00 2026-09-04 nsano initial version <br>
@@ -46,6 +48,9 @@ public class IfwSoundbank implements Soundbank {
 
     /** how many programs a MIDI bank holds */
     private static final int BANK_SIZE = 128;
+
+    /** how many banks a bank select reaches, the 14 bits of CC 0 and CC 32 */
+    private static final int BANK_COUNT = 16384;
 
     /** */
     private final String name;
@@ -116,8 +121,8 @@ public class IfwSoundbank implements Soundbank {
     /**
      * Reads a tone, or a folder of them.
      * <p>
-     * a folder is walked one level deep: its own tones become bank 0 and each subfolder
-     * becomes a bank of its own.
+     * a folder is walked all the way down, and every tone under it is numbered, so nothing
+     * is left out however deep a player has filed it away.
      */
     public static IfwSoundbank read(Path path) throws IOException {
         if (!Files.isDirectory(path)) {
@@ -127,33 +132,38 @@ public class IfwSoundbank implements Soundbank {
         }
 
         IfwSoundbank soundbank = new IfwSoundbank(path.getFileName().toString());
-        soundbank.load(path, 0);
-        int bank = 1;
-        for (Path folder : list(path, Files::isDirectory)) {
-            soundbank.load(folder, bank++);
-        }
+        soundbank.load(path);
         if (soundbank.instruments.isEmpty()) {
             throw new IOException("no IFW tone under: " + path);
         }
         return soundbank;
     }
 
-    /** Reads the tones directly in {@code folder} into one bank. */
-    private void load(Path folder, int bank) throws IOException {
-        int program = 0;
+    /** Reads the tones in {@code folder}, and then those of the folders in it. */
+    private void load(Path folder) throws IOException {
         for (Path file : list(folder, p -> Files.isRegularFile(p)
                 && p.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".xml"))) {
-            if (program >= BANK_SIZE) {
-logger.log(Level.INFO, "more than " + BANK_SIZE + " tones, the rest of the bank is dropped: " + folder);
-                break;
+            if (instruments.size() >= BANK_COUNT * BANK_SIZE) {
+logger.log(Level.INFO, "the numbering is full, the rest is dropped: " + folder);
+                return;
             }
             try (InputStream in = new BufferedInputStream(Files.newInputStream(file))) {
-                instruments.add(new IfwInstrument(this, new Patch(bank, program++), IfwProgram.read(in)));
+if (logger.isLoggable(Level.TRACE)) { System.out.printf("patch[%d.%d]: %s%n", patch(instruments.size()).getBank(), patch(instruments.size()).getProgram(), file); }
+                // the count so far is the number, so a file that turns out not to be a tone takes none
+                instruments.add(new IfwInstrument(this, patch(instruments.size()), IfwProgram.read(in)));
             } catch (IOException e) {
                 // a folder of tones can hold anything, one unreadable file is not fatal
 logger.log(Level.DEBUG, "not an IFW tone, skipped: " + file + ": " + e.getMessage());
             }
         }
+        for (Path sub : list(folder, Files::isDirectory)) {
+            load(sub);
+        }
+    }
+
+    /** the patch of the {@code index}th tone, the count running on into the bank above at {@value #BANK_SIZE} */
+    private static Patch patch(int index) {
+        return new Patch(index / BANK_SIZE, index % BANK_SIZE);
     }
 
     /** */

@@ -6,11 +6,8 @@
 
 package vavi.sound.midi.wind;
 
-import java.io.IOException;
 import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -65,9 +62,15 @@ import static vavi.sound.midi.wind.WindMidiDeviceProvider.version;
  * a controller that sends none of that still sounds: until the first breath message
  * arrives, note velocity stands in for it.
  * <p>
- * the default soundbank is whatever IFW itself has installed, the tones under
+ * the default soundbank is whatever IFW itself has installed, every tone under
  * {@code ~/Documents/IFW/Sounds}, or the IFW initial program alone when that folder is
- * not there. the system property {@code vavi.sound.wind.sounds} points somewhere else.
+ * not there. it is loaded whole and numbered as one running count, so a program change on
+ * its own walks the installed tones and no bank select is needed to reach the first 128 of
+ * them. every channel starts on the tone at its own bank and program, which is the first
+ * installed tone before any program change arrives.
+ * {@link WindSoundbankReader#getDefaultSoundbank()} is where it comes from, and
+ * {@link #loadAllInstruments(Soundbank)} puts another one in its place, a folder or a
+ * single tone read by {@link WindSoundbankReader}.
  *
  * @author <a href="mailto:umjammer@gmail.com">Naohide Sano</a> (nsano)
  * @version 0.00 2026-09-04 nsano initial version <br>
@@ -83,10 +86,6 @@ public class WindSynthesizer implements Synthesizer {
                     "vavi",
                     "Software synthesizer for wind controllers, an IFW clone",
                     "Version " + version) {};
-
-    /** where IFW keeps its tones */
-    private static final String SOUNDS = System.getProperty("vavi.sound.wind.sounds",
-            System.getProperty("user.home") + "/Documents/IFW/Sounds");
 
     /** one monophonic instrument per channel, as IFW is one instance per part */
     private static final int MAX_CHANNEL = 16;
@@ -169,8 +168,30 @@ logger.log(Level.WARNING, "vavi.sound.wind.volume: " + property);
             channels[i] = new WindMidiChannel(i);
         }
         breathResponse(BREATH_RESPONSE);
-        this.soundbank = defaultSoundbank();
+        this.soundbank = WindSoundbankReader.getDefaultSoundbank();
         Collections.addAll(loaded, soundbank.getInstruments());
+        select();
+    }
+
+    /**
+     * Puts the tone at its own bank and program into every channel.
+     * <p>
+     * a channel plays whatever the loaded instruments say its bank and program mean, and
+     * that is decided here rather than at the program change alone: a channel that has had
+     * no program change is on bank 0 program 0, which is the first tone of the installed
+     * folder, and a soundbank arriving later moves every channel to its tone of the same
+     * patch. without it a freshly opened synthesizer would sound the IFW initial program,
+     * whatever the soundbank holds.
+     */
+    private void select() {
+        for (WindMidiChannel channel : channels) {
+            channel.select();
+        }
+    }
+
+    /** the tone a channel is playing, which is the tone at its bank and program */
+    public IfwProgram getTone(int channel) {
+        return channels[channel].engine.getProgram();
     }
 
     /**
@@ -212,19 +233,6 @@ logger.log(Level.WARNING, "vavi.sound.wind.volume: " + property);
      */
     public float getMasterVolume() {
         return masterGain;
-    }
-
-    /** the tones IFW has installed, or the initial program alone */
-    private static Soundbank defaultSoundbank() {
-        Path path = Path.of(SOUNDS);
-        if (Files.exists(path)) {
-            try {
-                return IfwSoundbank.read(path);
-            } catch (IOException e) {
-logger.log(Level.INFO, "no IFW tone under " + path + ": " + e.getMessage());
-            }
-        }
-        return new IfwSoundbank();
     }
 
     @Override
@@ -290,7 +298,7 @@ logger.log(Level.INFO, e.getMessage(), e);
 
     /** one clipped 16 bit little endian sample */
     private static void write(byte[] buffer, int offset, float value) {
-        int sample = Math.round(Math.max(-1, Math.min(1, value)) * Short.MAX_VALUE);
+        int sample = Math.round(Math.clamp(value, -1, 1) * Short.MAX_VALUE);
         buffer[offset] = (byte) sample;
         buffer[offset + 1] = (byte) (sample >> 8);
     }
@@ -395,12 +403,14 @@ logger.log(Level.INFO, e.getMessage(), e);
         }
         loaded.removeIf(i -> samePatch(i.getPatch(), instrument.getPatch()));
         loaded.add(instrument);
+        select();
         return true;
     }
 
     @Override
     public void unloadInstrument(Instrument instrument) {
         loaded.remove(instrument);
+        select();
     }
 
     @Override
@@ -409,6 +419,7 @@ logger.log(Level.INFO, e.getMessage(), e);
             return false;
         }
         loaded.add(to);
+        select();
         return true;
     }
 
@@ -435,12 +446,14 @@ logger.log(Level.INFO, e.getMessage(), e);
         this.soundbank = soundbank;
         loaded.clear();
         Collections.addAll(loaded, soundbank.getInstruments());
+        select();
         return true;
     }
 
     @Override
     public void unloadAllInstruments(Soundbank soundbank) {
         loaded.removeIf(i -> i.getSoundbank() == soundbank);
+        select();
     }
 
     @Override
@@ -462,6 +475,7 @@ logger.log(Level.INFO, e.getMessage(), e);
         for (Patch patch : patchList) {
             loaded.removeIf(i -> i.getSoundbank() == soundbank && samePatch(i.getPatch(), patch));
         }
+        select();
     }
 
     /** */
@@ -469,7 +483,15 @@ logger.log(Level.INFO, e.getMessage(), e);
         return a.getBank() == b.getBank() && a.getProgram() == b.getProgram();
     }
 
-    /** the tone at a patch, the nearest one in the bank when it is empty */
+    /**
+     * The tone at a patch, the nearest one in the bank when it is empty.
+     * <p>
+     * the bank is the 14 bits of CC 0 and CC 32 together, the 0 .. 16383 that
+     * {@link MidiChannel#programChange(int, int)} and {@link Patch#getBank()} carry.
+     * {@link IfwSoundbank} numbers its tones from bank 0 up, so the bank select LSB is
+     * what reaches the ones past the first 128 and a program change alone is enough below
+     * that.
+     */
     private IfwProgram find(int bank, int program) {
         Instrument fallback = null;
         for (Instrument instrument : loaded) {
@@ -482,7 +504,7 @@ logger.log(Level.INFO, e.getMessage(), e);
             }
         }
         if (fallback == null && !loaded.isEmpty()) {
-            fallback = loaded.get(0);
+            fallback = loaded.getFirst();
         }
         return fallback == null ? null : (IfwProgram) fallback.getData();
     }
@@ -634,13 +656,18 @@ logger.log(Level.TRACE, "control change unhandled[%d]: (%02x): %d".formatted(cha
         @Override
         public void programChange(int program) {
             this.program = program & 0x7f;
-            IfwProgram tone = find(bank >> 7, this.program);
+            select();
+        }
+
+        /** Puts the tone at this channel's bank and program into the engine. */
+        void select() {
+            IfwProgram tone = find(bank, program);
             if (tone == null) {
-logger.log(Level.DEBUG, "program change[%d]: %d, no tone".formatted(channel, this.program));
+logger.log(Level.DEBUG, "select[%d]: %d, no tone".formatted(channel, program));
                 return;
             }
             engine.setProgram(new IfwProgram(tone));
-logger.log(Level.DEBUG, "program change[%d]: %d: %s".formatted(channel, this.program, tone.getName()));
+logger.log(Level.DEBUG, "select[%d]: %d: %s".formatted(channel, program, tone.getName()));
         }
 
         @Override

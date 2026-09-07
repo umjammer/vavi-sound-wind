@@ -67,11 +67,12 @@ class WindSynthesizerTest {
         for (MidiChannel channel : synthesizer.getChannels()) {
             assertTrue(channel.getMono());
         }
+        synthesizer.close();
     }
 
     @Test
     void aToneCanBeLoadedAndSwitchedTo() {
-        Synthesizer synthesizer = new WindSynthesizer();
+        WindSynthesizer synthesizer = new WindSynthesizer();
         IfwProgram program = new IfwProgram();
         program.setName("Loaded By The Test");
         program.set(IfwParameter.Osc1Semi, 12);
@@ -83,6 +84,51 @@ class WindSynthesizerTest {
 
         synthesizer.getChannels()[0].programChange(5);
         assertEquals(5, synthesizer.getChannels()[0].getProgram());
+        assertEquals("Loaded By The Test", synthesizer.getTone(0).getName());
+        synthesizer.close();
+    }
+
+    @Test
+    void theDefaultSoundbankIsEveryToneIfwHasInstalled() {
+        Soundbank soundbank = WindSoundbankReader.getDefaultSoundbank();
+        assertInstanceOf(IfwSoundbank.class, soundbank);
+        // the installed folder, or the initial program alone when there is no folder
+        assertTrue(soundbank.getInstruments().length > 0);
+        assertNotNull(soundbank.getInstrument(new Patch(0, 0)));
+
+        WindSynthesizer synthesizer = new WindSynthesizer();
+        assertInstanceOf(IfwSoundbank.class, synthesizer.getDefaultSoundbank());
+        assertEquals(soundbank.getInstruments().length, synthesizer.getAvailableInstruments().length);
+        assertEquals(soundbank.getInstruments().length, synthesizer.getLoadedInstruments().length);
+        synthesizer.close();
+    }
+
+    @Test
+    void everyChannelStartsOnTheDefaultSoundbanksFirstTone() {
+        WindSynthesizer synthesizer = new WindSynthesizer();
+        // bank 0 program 0, which is where a channel stands before any program change
+        Instrument first = synthesizer.getDefaultSoundbank().getInstrument(new Patch(0, 0));
+        assertNotNull(first);
+        for (int channel = 0; channel < synthesizer.getChannels().length; channel++) {
+            assertEquals(first.getName(), synthesizer.getTone(channel).getName());
+        }
+        synthesizer.close();
+    }
+
+    @Test
+    void aToneReadByTheSoundbankReaderBecomesWhatTheChannelsPlay(@TempDir Path folder) throws Exception {
+        Path file = folder.resolve("Read By The Reader.xml");
+        write(file, "Read By The Reader");
+
+        WindSynthesizer synthesizer = new WindSynthesizer();
+        Soundbank soundbank = new WindSoundbankReader().getSoundbank(file.toFile());
+        assertNotNull(soundbank);
+        assertTrue(synthesizer.loadAllInstruments(soundbank));
+
+        // no program change: loading it is what puts it on the channels
+        assertEquals("Read By The Reader", synthesizer.getTone(0).getName());
+        assertEquals("Read By The Reader", synthesizer.getTone(15).getName());
+        synthesizer.close();
     }
 
     @Test
@@ -109,17 +155,77 @@ class WindSynthesizerTest {
     }
 
     @Test
-    void aFolderOfTonesBecomesBanks(@TempDir Path folder) throws Exception {
-        Files.createDirectory(folder.resolve("bank one"));
+    void aFolderOfTonesBecomesOneRunningNumbering(@TempDir Path folder) throws Exception {
+        Files.createDirectories(folder.resolve("one/deeper"));
+        Files.createDirectory(folder.resolve("two"));
         write(folder.resolve("top.xml"), "Top");
-        write(folder.resolve("bank one/first.xml"), "First");
-        write(folder.resolve("bank one/second.xml"), "Second");
+        write(folder.resolve("one/first.xml"), "First");
+        write(folder.resolve("one/second.xml"), "Second");
+        write(folder.resolve("one/deeper/deep.xml"), "Deep");
+        write(folder.resolve("two/other.xml"), "Other");
+
+        // a folder's own tones, then the folders in it, each read the same way
+        IfwSoundbank soundbank = IfwSoundbank.read(folder);
+        assertEquals(5, soundbank.getInstruments().length);
+        String[] order = {"Top", "First", "Second", "Deep", "Other"};
+        for (int program = 0; program < order.length; program++) {
+            assertEquals(order[program], soundbank.getInstrument(new Patch(0, program)).getName());
+        }
+    }
+
+    @Test
+    void theNumberingRunsOnIntoTheBankAbove(@TempDir Path folder) throws Exception {
+        for (int i = 0; i < 130; i++) {
+            write(folder.resolve("tone %03d.xml".formatted(i)), "Tone " + i);
+        }
 
         IfwSoundbank soundbank = IfwSoundbank.read(folder);
-        assertEquals(3, soundbank.getInstruments().length);
-        assertEquals("Top", soundbank.getInstrument(new Patch(0, 0)).getName());
-        assertEquals("First", soundbank.getInstrument(new Patch(1, 0)).getName());
-        assertEquals("Second", soundbank.getInstrument(new Patch(1, 1)).getName());
+        assertEquals(130, soundbank.getInstruments().length);
+        assertEquals("Tone 0", soundbank.getInstrument(new Patch(0, 0)).getName());
+        assertEquals("Tone 127", soundbank.getInstrument(new Patch(0, 127)).getName());
+        assertEquals("Tone 128", soundbank.getInstrument(new Patch(1, 0)).getName());
+        assertEquals("Tone 129", soundbank.getInstrument(new Patch(1, 1)).getName());
+    }
+
+    @Test
+    void aProgramChangeOnItsOwnWalksTheTones(@TempDir Path folder) throws Exception {
+        Files.createDirectory(folder.resolve("one"));
+        write(folder.resolve("top.xml"), "Top");
+        write(folder.resolve("one/first.xml"), "First");
+        write(folder.resolve("one/second.xml"), "Second");
+
+        WindSynthesizer synthesizer = new WindSynthesizer();
+        synthesizer.loadAllInstruments(IfwSoundbank.read(folder));
+        Receiver receiver = synthesizer.getReceiver();
+
+        // no bank select, which is all a wind controller or a sequencer usually sends
+        String[] order = {"Top", "First", "Second"};
+        for (int program = 0; program < order.length; program++) {
+            receiver.send(new ShortMessage(ShortMessage.PROGRAM_CHANGE, 0, program, 0), -1);
+            assertEquals(order[program], synthesizer.getTone(0).getName());
+        }
+        synthesizer.close();
+    }
+
+    @Test
+    void theBankSelectReachesThePrograms() throws Exception {
+        // the bank is the 14 bits of CC 0 and CC 32 together, so the LSB alone is bank 1
+        WindSynthesizer synthesizer = new WindSynthesizer();
+        IfwProgram program = new IfwProgram();
+        program.setName("In The Bank Above");
+        synthesizer.loadInstrument(new IfwSoundbank.IfwInstrument(
+                synthesizer.getDefaultSoundbank(), new Patch(1, 3), program));
+
+        Receiver receiver = synthesizer.getReceiver();
+        receiver.send(new ShortMessage(ShortMessage.CONTROL_CHANGE, 0, 0, 0), -1);
+        receiver.send(new ShortMessage(ShortMessage.CONTROL_CHANGE, 0, 32, 1), -1);
+        receiver.send(new ShortMessage(ShortMessage.PROGRAM_CHANGE, 0, 3, 0), -1);
+        assertEquals("In The Bank Above", synthesizer.getTone(0).getName());
+
+        // and the same patch asked for the way MidiChannel numbers a bank
+        synthesizer.getChannels()[1].programChange(1, 3);
+        assertEquals("In The Bank Above", synthesizer.getTone(1).getName());
+        synthesizer.close();
     }
 
     /** */
@@ -149,6 +255,7 @@ class WindSynthesizerTest {
             receiver.send(masterVolume(volume), -1);
             assertEquals(volume, synthesizer.getMasterVolume(), 1e-3f);
         }
+        synthesizer.close();
     }
 
     @Test
@@ -162,6 +269,7 @@ class WindSynthesizerTest {
 
         synthesizer.getReceiver().send(message, -1);
         assertEquals(.25f, synthesizer.getMasterVolume(), 1e-3f);
+        synthesizer.close();
     }
 
     @Test
@@ -174,6 +282,7 @@ class WindSynthesizerTest {
         byte[] other = {(byte) 0xf0, 0x7e, 0x7f, 0x09, 0x01, (byte) 0xf7};
         receiver.send(new SysexMessage(other, other.length), -1);
         assertEquals(.5f, synthesizer.getMasterVolume(), 1e-3f);
+        synthesizer.close();
     }
 
     /**
