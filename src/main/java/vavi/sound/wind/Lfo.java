@@ -8,13 +8,15 @@ package vavi.sound.wind;
 
 
 /**
- * Lfo. one of the two IFW low frequency oscillators.
+ * Lfo.
  * <p>
- * free running by default, restarted by every note when {@code Key Sync} is on, and
- * locked to the host tempo at a {@link LfoBeat} when {@code BPM Sync} is on.
+ * the speed knob is a square rather than a straight line, so that the bottom of it is a
+ * vibrato and the top of it is audio: a hundredth of a hertz per step at the bottom, a
+ * hundred hertz at the end.
  *
  * @author <a href="mailto:umjammer@gmail.com">Naohide Sano</a> (nsano)
  * @version 0.00 2026-09-04 nsano initial version <br>
+ * @version 0.01 2026-09-07 nsano the plug-in's own speed curve, and a positive output <br>
  */
 public class Lfo {
 
@@ -33,7 +35,7 @@ public class Lfo {
     /** */
     private boolean keySync;
 
-    /** */
+    /** 0 .. 1 */
     private float value;
 
     /** */
@@ -55,7 +57,7 @@ public class Lfo {
         }
     }
 
-    /** @return -1 .. 1 */
+    /** @return 0 .. 1 */
     public float process() {
         value = waveform.value(phase);
         phase += frequency / sampleRate;
@@ -65,13 +67,14 @@ public class Lfo {
         return value;
     }
 
-    /** @return -1 .. 1 */
+    /** @return 0 .. 1 */
     public float value() {
         return value;
     }
 
-    /** the speed knob 0 .. 10 in cycles per second */
+    /** the speed knob 0 .. 10 in cycles per second, a hundredth of a hertz up to a hundred */
     public static float hertz(float knob) {
-        return knob * 2;
+        float x = Math.max(0, Math.min(10, knob)) * 10;
+        return x * x * .01f;
     }
 }

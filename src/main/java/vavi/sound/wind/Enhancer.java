@@ -10,25 +10,32 @@ import java.util.Arrays;
 
 
 /**
- * Enhancer. the IFW stereo enhancer.
+ * Enhancer. what makes the one voice of IFW into two channels.
  * <p>
- * a monophonic wind synthesizer is a point in the middle of the image. delaying a copy
- * by a few milliseconds differently per side spreads that point out, by the precedence
- * effect, without detuning anything. a negative mix flips the copy and widens further.
+ * a delay of its own for each side, crossfaded against the dry signal rather than added to
+ * it, so that a mix of 10 is the delays alone. two delays a few milliseconds apart is what
+ * puts an instrument in a room without a reverb.
+ * <p>
+ * a direct current blocker follows it, which is what keeps a tone that leans on one side of
+ * zero from pushing the whole mix off centre.
  *
  * @author <a href="mailto:umjammer@gmail.com">Naohide Sano</a> (nsano)
  * @version 0.00 2026-09-04 nsano initial version <br>
+ * @version 0.01 2026-09-07 nsano a crossfade rather than an addition <br>
  */
 public class Enhancer {
 
-    /** the longest delay the IFW panel offers, in milliseconds */
-    private static final float MAX_DELAY = 50;
+    /** as far as the delay is let go, whatever the knob says */
+    private static final float MAX_DELAY = .1f;
 
     /** */
     private final float sampleRate;
 
     /** */
     private final float[] line;
+
+    /** */
+    private final int mask;
 
     /** */
     private int cursor;
@@ -39,15 +46,26 @@ public class Enhancer {
     /** -1 .. 1 */
     private float mix;
 
+    /** the two channels of the direct current blocker */
+    private final float[] blockerIn = new float[2], blockerOut = new float[2];
+
+    /** */
+    private final float blocker;
+
     /** */
     public Enhancer(float sampleRate) {
         this.sampleRate = sampleRate;
-        this.line = new float[(int) Math.ceil(MAX_DELAY / 1000 * sampleRate) + 2];
+        int size = Integer.highestOneBit((int) Math.ceil(MAX_DELAY * sampleRate) * 2 - 1) * 2;
+        this.line = new float[size];
+        this.mask = size - 1;
+        this.blocker = 1 - 16 / sampleRate;
     }
 
     /** */
     public void reset() {
         Arrays.fill(line, 0);
+        Arrays.fill(blockerIn, 0);
+        Arrays.fill(blockerOut, 0);
         cursor = 0;
     }
 
@@ -57,14 +75,14 @@ public class Enhancer {
      * @param mix the mix knob, -10 .. 10
      */
     public void set(float delayL, float delayR, float mix) {
-        this.delayL = clamp(delayL);
-        this.delayR = clamp(delayR);
-        this.mix = Math.max(-1, Math.min(1, mix / 10));
+        this.delayL = samples(delayL);
+        this.delayR = samples(delayR);
+        this.mix = clamp(mix / 10, -1, 1);
     }
 
     /** */
-    private float clamp(float milliseconds) {
-        return Math.max(0, Math.min(MAX_DELAY, milliseconds)) / 1000 * sampleRate;
+    private float samples(float milliseconds) {
+        return clamp(milliseconds / 1000, 0, MAX_DELAY) * sampleRate;
     }
 
     /**
@@ -74,20 +92,35 @@ public class Enhancer {
      */
     public void process(float in, float[] out) {
         line[cursor] = in;
-        out[0] = in + mix * read(delayL);
-        out[1] = in + mix * read(delayR);
-        cursor = cursor + 1 == line.length ? 0 : cursor + 1;
+        cursor = cursor + 1 & mask;
+
+        float dry = 1 - Math.abs(mix);
+        out[0] = block(0, dry * in + mix * read(delayL));
+        out[1] = block(1, dry * in + mix * read(delayR));
     }
 
     /** linearly interpolated, so that a moving delay does not click */
     private float read(float delay) {
-        float position = cursor - delay;
+        float position = cursor - 1 - delay;
         while (position < 0) {
             position += line.length;
         }
-        int i = (int) position;
-        float f = position - i;
-        int j = i + 1 == line.length ? 0 : i + 1;
+        int i = (int) position & mask;
+        int j = i + 1 & mask;
+        float f = position - (int) position;
         return line[i] + (line[j] - line[i]) * f;
+    }
+
+    /** */
+    private float block(int channel, float in) {
+        float out = in - blockerIn[channel] + blocker * blockerOut[channel];
+        blockerIn[channel] = in;
+        blockerOut[channel] = out;
+        return out;
+    }
+
+    /** */
+    private static float clamp(float value, float min, float max) {
+        return value < min ? min : Math.min(value, max);
     }
 }

@@ -10,28 +10,31 @@ package vavi.sound.wind;
 /**
  * Oscillator. one of the four IFW oscillators.
  * <p>
- * an oscillator is three slots mixed by their own level knobs, and the modulation matrix
- * can read each slot on its own, which is how an IFW patch builds FM and ring modulation
- * without a dedicated operator section.
+ * an oscillator is three slots mixed by their own level knobs, and the modulation matrix can
+ * read each slot on its own, which is how an IFW patch builds FM and ring modulation without
+ * a dedicated operator section.
  * <ol>
- * <li>a sawtooth</li>
- * <li>the wave {@link Waveform} selects, a triangle unless the patch says otherwise</li>
- * <li>a pulse whose width the {@code WIDTH} knob sets, or the single cycle instrument
- *     wave {@link PcmWaveform} selects</li>
+ * <li>a sawtooth, always wave 0 of the {@link WaveBank}</li>
+ * <li>the wave {@link Waveform} names, a triangle unless the tone says otherwise, or the
+ *     host's own input</li>
+ * <li>a pulse, which is the sawtooth of the first slot less a copy of itself shifted by the
+ *     {@code WIDTH} knob, so that it is band limited for nothing</li>
  * </ol>
- * oscillator 4 replaces the third slot with noise, so it is the one a patch reaches for
- * to put breath noise into a flute.
+ * oscillator 4 spends its third slot on noise instead, which is the one a patch reaches for
+ * to put breath into a flute.
  * <p>
- * the sawtooth and the pulse are band limited by polyBLEP, which keeps the aliasing of a
- * bright patch under control without oversampling.
+ * nothing here is generated a sample at a time: every slot reads the table its note has, and
+ * a table holds only the harmonics that fit, so a bright patch does not alias however high it
+ * is played.
  *
  * @author <a href="mailto:umjammer@gmail.com">Naohide Sano</a> (nsano)
  * @version 0.00 2026-09-04 nsano initial version <br>
+ * @version 0.01 2026-09-07 nsano the wavetables the plug-in actually reads <br>
  */
 public class Oscillator {
 
-    /** */
-    private final float sampleRate;
+    /** the waves every oscillator reads */
+    private static final WaveBank BANK = WaveBank.getInstance();
 
     /** whether this is oscillator 4, whose third slot is noise */
     private final boolean noiseSlot;
@@ -42,18 +45,14 @@ public class Oscillator {
     /** the last output of each slot, -1 .. 1 */
     private float saw, wave, pulse;
 
-    /** the running sample and hold of the noise slot */
-    private float noise;
+    /** the running sample and hold of the noise slot, and how far it has run */
+    private float noise, noisePhase;
 
-    /** how far the lo-fi sample and hold of the noise slot has run */
-    private float noisePhase;
-
-    /** */
-    private long random = 0x5deece66dL;
+    /** the two words of the plug-in's own noise generator */
+    private int random0 = 0xefcdab89, random1 = 0xefcdab89;
 
     /** */
-    public Oscillator(float sampleRate, boolean noiseSlot) {
-        this.sampleRate = sampleRate;
+    public Oscillator(boolean noiseSlot) {
         this.noiseSlot = noiseSlot;
     }
 
@@ -78,62 +77,54 @@ public class Oscillator {
         return pulse;
     }
 
-    /** */
+    /** 0 .. 1 */
     public float phase() {
         return phase;
+    }
+
+    /** Puts the cycle back to where a synchronised oscillator starts it. */
+    public void sync(float phase) {
+        this.phase = phase;
     }
 
     /**
      * Steps one sample.
      *
-     * @param frequency Hz
+     * @param note which band limited table to read, 0 .. 191
+     * @param increment how far through the cycle one sample goes
      * @param fm phase modulation in cycles, from the modulation matrix
-     * @param width the pulse duty, 0 .. 1
-     * @param pulsePhase an offset of the pulse slot only, in cycles
-     * @param waveform what the second slot generates
-     * @param pcm an instrument wave for the third slot, {@link PcmWaveform#None} for the pulse
-     * @param loFi the noise sample and hold knob of oscillator 4, 0 .. 10
-     * @param external the host input, for the {@code Ext.In} waveforms
-     * @param sync whether to restart the cycle, the master oscillator has just wrapped
-     * @return whether this oscillator wrapped, so that it can drive a synchronized one
+     * @param width the pulse duty, 0 .. 1, over which the slot falls silent
+     * @param waveform what the second slot reads
+     * @param loFi the sample and hold of the noise slot, 0 .. 1
+     * @param external the host input the second slot mixes, already weighted
      */
-    public boolean process(float frequency, float fm, float width, float pulsePhase,
-                           Waveform waveform, PcmWaveform pcm, float loFi, float external, boolean sync) {
+    public void process(int note, float increment, float fm, float width,
+                        Waveform waveform, float loFi, float external) {
 
-        float increment = Math.min(.5f, Math.abs(frequency) / sampleRate);
-        if (sync) {
-            phase = 0;
-        }
-
-        float p = wrap(phase + fm);
-        saw = 2 * p - 1 - polyBlep(p, increment);
-
-        wave = waveform.isExternal() ? external : waveform.value(p);
+        // the ten keeps the truncation on the positive side, whatever the modulation did
+        float p = wrap(phase + 10 + fm);
+        saw = BANK.value(0, note, p);
+        wave = BANK.value(waveform.wave(), note, p) * waveform.gain() + external;
 
         if (noiseSlot) {
-            // 10 means a sample and hold at about 200 Hz, 0 leaves the noise at full rate
-            float rate = loFi <= 0 ? 1 : (float) Math.pow(10, -loFi * 0.24);
-            noisePhase += rate;
+            noisePhase += 1 / (1 + 39 * clamp(loFi));
             if (noisePhase >= 1) {
                 noisePhase -= (int) noisePhase;
-                random = random * 0x5deece66dL + 0xb;
-                noise = (random >> 24 & 0xffff) / 32768f - 1;
+                random0 ^= random1;
+                random1 += random0;
+                noise = random1 * 4.4237822e-10f;
             }
             pulse = noise;
-        } else if (pcm != PcmWaveform.None) {
-            pulse = pcm.value(wrap(p + pulsePhase));
         } else {
-            float w = Math.min(.99f, Math.max(.01f, width));
-            float t = wrap(p + pulsePhase);
-            pulse = (t < w ? 1 : -1) + polyBlep(t, increment) - polyBlep(wrap(t - w), increment);
+            // a pulse is a sawtooth less the same sawtooth a part of a cycle later
+            float w = width >= 1 ? 0 : Math.max(0, width);
+            pulse = saw - BANK.value(0, note, wrap(p + w));
         }
 
         phase += increment;
-        boolean wrapped = phase >= 1;
-        if (wrapped) {
+        if (phase >= 1) {
             phase -= (int) phase;
         }
-        return wrapped;
     }
 
     /** */
@@ -142,27 +133,8 @@ public class Oscillator {
         return p < 0 ? p + 1 : p;
     }
 
-    /**
-     * The correction that rounds off the step of a naive sawtooth or pulse, so that the
-     * harmonics above nyquist fold back quietly instead of as a whistle.
-     *
-     * @param t where in the cycle we are, 0 .. 1
-     * @param dt one sample as a part of the cycle
-     */
-    private static float polyBlep(float t, float dt) {
-        if (t < dt) {
-            float x = t / dt;
-            return x + x - x * x - 1;
-        }
-        if (t > 1 - dt) {
-            float x = (t - 1) / dt;
-            return x * x + x + x + 1;
-        }
-        return 0;
-    }
-
-    /** the semi and tune knobs of an oscillator as a frequency factor */
-    public static float detune(float semi, float cents) {
-        return (float) Math.pow(2, (semi + cents / 100) / 12);
+    /** */
+    private static float clamp(float value) {
+        return value < 0 ? 0 : Math.min(value, 1);
     }
 }

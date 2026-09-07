@@ -144,10 +144,10 @@ class IfwProgramTest {
     @Test
     void aWaveformOlderThanItsLabelsIsReadAsAnOrdinal() throws Exception {
         // versions before the instrument waves wrote the slot as a plain number
-        assertSame(PcmWaveform.None, read(tone("Old", "<Osc1Waveform3>0.00</Osc1Waveform3>"))
-                .choice(IfwParameter.Osc1Waveform3, PcmWaveform.class));
-        assertSame(PcmWaveform.Oboe, read(tone("New", "<Osc1Waveform3>Oboe</Osc1Waveform3>"))
-                .choice(IfwParameter.Osc1Waveform3, PcmWaveform.class));
+        assertSame(Waveform.TRI, read(tone("Old", "<Osc1Waveform2>3.00</Osc1Waveform2>"))
+                .choice(IfwParameter.Osc1Waveform2, Waveform.class));
+        assertSame(Waveform.Oboe, read(tone("New", "<Osc1Waveform2>Oboe</Osc1Waveform2>"))
+                .choice(IfwParameter.Osc1Waveform2, Waveform.class));
     }
 
     @Test
