@@ -5,7 +5,7 @@
 
   <groupId>vavi</groupId>
   <artifactId>vavi-sound-wind</artifactId>
-  <version>0.0.2</version>
+  <version>0.0.3</version>
 
   <build>
     <plugins>
@@ -74,8 +74,8 @@
 
     <dependency>
       <groupId>com.github.umjammer</groupId> <!-- vavi / com.github.umjammer -->
-      <artifactId>vavi-sound</artifactId>
-      <version>1.0.30</version>
+      <artifactId>vavi-sound-sandbox</artifactId>
+      <version>1.0.18</version>
       <scope>test</scope>
     </dependency>
   </dependencies>

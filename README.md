@@ -214,6 +214,7 @@ from older versions that stop partway through the 200 slot table.
  * the seven instrument waves on a machine that has no IFW on it, rather than
    approximations of them
  * a GUI for the panel
+ * ~~connect midi output to au~~ ... [vavi-sound-sandbox](https://github.com/umjammer/vavi-sound-sandbox)
 
 ---
 

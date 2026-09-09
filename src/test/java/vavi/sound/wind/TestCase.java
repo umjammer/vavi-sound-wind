@@ -82,6 +82,9 @@ class TestCase {
     @Property
     String tone;
 
+    @Property(name = "au.effects")
+    String effects = "appl:mrev?Dry/Wet Mix=20,appl:dely?Dry/Wet Mix=15;Delay Time=0.25;Feedback=20";
+
     @Property(name = "vavi.test.volume.midi")
     float midiVolume = 0.2f;
 
@@ -95,6 +98,11 @@ class TestCase {
         outVendor = outVendor != null ? (outVendor.isEmpty() ? null : outVendor) : null;
         outDescription = outDescription != null ? (outDescription.isEmpty() ? null : outDescription) : null;
 
+        if (System.getProperty("os.name").startsWith("Mac")) {
+Debug.println("on mac, use AudioUnit effects: " + effects);
+            System.setProperty("javax.sound.sampled.SourceDataLine", "#Rococoa Mixer"); // audio out is AudioUnit fixed
+            System.setProperty("vavi.sound.sampled.rococoa.RococoaSourceDataLine.effects", effects);
+        }
 Debug.println("volume: " + midiVolume);
     }
 
