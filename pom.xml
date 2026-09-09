@@ -74,8 +74,8 @@
 
     <dependency>
       <groupId>com.github.umjammer</groupId> <!-- vavi / com.github.umjammer -->
-      <artifactId>vavi-sound</artifactId>
-      <version>1.0.30</version>
+      <artifactId>vavi-sound-sandbox</artifactId>
+      <version>1.0.17</version>
       <scope>test</scope>
     </dependency>
   </dependencies>
