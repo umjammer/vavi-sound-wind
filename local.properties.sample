@@ -1,0 +1,19 @@
+vavi.test.volume.midi=1
+
+# AudioUnit effect chain (mac only)
+au.effects=appl:mrev?Dry/Wet Mix=40,appl:dely?Dry/Wet Mix=15;Delay Time=0.15;Feedback=10
+
+# choose your wind controller
+in.name=
+in.vendor=Akai Professional, LLC.
+in.description=EWI-USB
+
+# this wind synthesizer
+out.name=Wind MIDI Synthesizer
+out.vendor=vavi
+out.description=
+
+# patch no.
+program=1
+# individual tone file
+#tone=/Users/foo/Documents/IFW/Sounds/bar.xml
